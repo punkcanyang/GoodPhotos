@@ -1,0 +1,68 @@
+# 任务清单
+
+- [x] 1. 照片移除功能
+  - [x] 在 `App.tsx` 中编写 `handleRemoveImage` 函数，从 `images` 状态中删除指定 ID 的照片。
+  - [x] 在画廊每个照片卡片的右上角增加一个红色的关闭 `X` 按钮组件（当非多选模式时显示）。
+- [x] 2. 照片放大检视功能
+  - [x] 在 `App.tsx` 中新增 `enlargedImageId` 状态用于控制当前居中放大的图片。
+  - [x] 当点击照片卡片时（如果非多选模式），除了原本的焦点选择逻辑外，更新 `enlargedImageId` 全屏展示这部分。
+  - [x] 编写全屏放大遮罩弹窗 (Modal) UI 覆盖整个应用，点击背景关闭。
+- [x] 3. 放大检视导航功能
+  - [x] 在 `App.tsx` 中监听键盘 `ArrowLeft` 和 `ArrowRight` 事件，实现放大状态下的图片切换。
+  - [x] 在放大的图片两侧添加「上一张」、「下一张」的悬浮按钮。
+- [x] 4. 放大检视的标签与移除功能
+  - [x] 在 `App.tsx` 的全屏放大视图中，新增「移除照片」和「贴标签」的悬浮按钮。
+  - [x] 修改 `handleAddTags` 函数使其在单张照片放大检视时也能兼容打标签逻辑。
+  - [x] 修改移除照片逻辑，在全屏视图移除照片时自动切换到下一张（如果存在）。
+- [x] 5. 标签库 (Tag Library)
+  - [x] 在 `App.tsx` 中增加 `recentTags` 状态，并在组件挂载时从 `localStorage` 读取。
+  - [x] 在执行 `handleAddTags` 时，自动将新标签加入 `recentTags`（去重并保留最近使用，比如限制最多 20 个），同时同步到 `localStorage`。
+  - [x] 在「贴标签的弹窗」内展示这些历史标签的按钮，点击即可迅速追加到输入框 `tagInput` 中。
+- [x] 6. 提升预览图的压缩分辨率
+  - [x] 修改 `src/utils/imageProcessor.ts` 中的默认 `maxSize`，从 1024 提升到 2048（或更大）。
+  - [x] 同时微调默认的质量 (quality)，例如从 0.8 升至 0.85，以提升感官上的清晰度。
+- [x] 7. 放大图的 AI 深度阅片点评
+  - [x] 在 `src/utils/qwenClient.ts` 中新增 `critiqueImage` 函数，调用 Vision 模型，以“专业摄影师角度”评估相片的构图、打光等指标，并返回详细文本。
+  - [x] 在 `App.tsx` 放大视图的下方或右侧添加一个「AI专业点评」的按钮。
+  - [x] 点击按钮后展示 Loading 状态，调用 `critiqueImage` 并在图片旁边（或覆盖一层）的面板显示点评文字。
+- [x] 8. 提升 AI 点评专业度与调教参数
+  - [x] 在 `qwenClient.ts` 的 `critiqueImage` 方法中重构 System Prompt，增加“苛刻、毒舌、找缺点”的人设。
+  - [x] 增加输出评价的具体约束条款（如地平线、边缘裁切、光影断层等），现已改为严格换行的专业指导建议。
+  - [x] 调低 API 请求的 `temperature` 至 `0.5`，使输出更聚焦。
+- [x] 9. 自定义 API Key 设置功能
+  - [x] 在 `qwenClient.ts` 中优先从 `localStorage` 读取 `goodphoto_api_key`。
+  - [x] 在 `App.tsx` 左侧抽屉增加「设置」入口按钮。
+  - [x] 在 `App.tsx` 新增弹窗组件 (Settings Modal)，支持输入、保存 API Key 到本地。
+- [x] 10. 增加「拉杆式」评分过滤功能
+  - [x] 在 `App.tsx` 的所有过滤器按钮组旁边增加一个 `input type="range"`。
+  - [x] 根据拉杆选定的最低分过滤掉照片池中低于阈值的照片。
+- [x] 11. 融合大师级艺术审美底层 Prompt
+  - [x] 修改 `qwenClient.ts` 中 `evaluateImages` 的系统提示词，引入 Magnum / Vogue / National Geographic 作为潜台词标准。
+  - [x] 强制要求模型后台计算构图张力、光影、情绪等 6 大维度，最终输出具有深度艺术批判视角的精炼 JSON。
+- [x] 12. 在放大模式下显示 AI 评分与点评
+  - [x] 在 `App.tsx` 中定位 `enlargedImageId` 的模态框视图。
+  - [x] 查询当前放大的图片的 `evaluations[enlargedImageId]`。
+  - [x] 如果存在点评数据，在图片底端渲染一个半透明的深色遮罩面板，展示分数和深度批判文本。
+- [x] 13. 多模态大模型无缝切换架构 (Multi-Model Client)
+  - [x] 在 `App.tsx` 的「设置」区域中加入下拉菜单，支持选择 Provider (如 OpenAI, Gemini, Qwen)。
+  - [x] 将保存配置的方式升级为支持存储 Endpoint URL、Provider 类型、API Key。
+  - [x] 重写 `qwenClient.ts`（可重命名为通用名称），使其根据配置分支构建 Request Payload。
+  - [x] 实现针对 GPT-4o 的消息结构封装，以及使用 Gemini 独有 `inlineData` 组装图片。
+- [x] 14. 全局多语言支持架构 (Global i18n Support)
+  - [x] 安装并配置 `i18next` 及 `react-i18next`。
+  - [x] 在 `src/i18n.ts` 集中挂载中英文(`zh-CN`, `en`)静态翻译词典数据。
+  - [x] 全局替换 `App.tsx` 内所有写死的中文文案为 `t('key')` 的动态形式。
+  - [x] 在「设置」弹窗增加界面语言切换的下拉框，并进行 `localStorage` 持久化。
+- [x] 15. 多语言 AI 提示词适配 (Language-Aware Prompting)
+  - [x] 在 `App.tsx` 中向 `manifestAestheticIntent`, `evaluateImages`, `critiqueImage` 传递当前语言环境(如 `zh` / `en`)。
+  - [x] 在 `llmClient.ts` 对应的 prompt 中强迫 AI 按照用户的界面语言返回 JSON 和文本内容。
+- [x] 16. 项目文档与开源准备 (Documentation & Publishing)
+  - [x] 添加 `.env` 到 `.gitignore` 以防止 API Key 泄露。
+  - [x] 编写包含中英双语和互相跳转锚点的规范化 `README.md`。
+  - [x] 初始化本地 Git 仓库，连接远端至 `https://github.com/punkcanyang/GoodPhoto.git` 并提交初始 commit。
+- [ ] 17. 商业化进阶闭环能力 (Commercialization Roadmap)
+  - [x] **Lightroom / Capture One 桥接 (杀手级)**：生成对应的 XMP 伴随文件，包含 AI 的星级及颜色标签，实现导入 LR 时免筛选。
+  - [x] **客户选片交付大厅 (Client Proofing)**：根据筛选结果一键生成本地或带签名的 Web 发片画廊，供客户线上二选打勾。
+  - [x] **个性化摄影师审美微调 (Custom Aesthetics)**：支持自定义选择流派预设（如网红感 vs 杂志感），或开启高阶设置自主编写大模型核心判图 System Prompt。
+  - [x] **人脸聚类与微表情优选 (Group Photo Assessor)**：基于连拍多张大合照，利用端侧或 AI API 识别并挑出“无人闭眼、笑容自然”的最佳定格。
+  - [x] **移除水印功能**：集成 Stability AI 的图像内补全(Erase)扩展模块，允许使用者从画布直接抹除杂物并自动原生保存。
