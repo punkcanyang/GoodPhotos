@@ -94,6 +94,17 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .setup(|app| {
+            #[cfg(desktop)]
+            app.handle().plugin(
+                tauri_plugin_updater::Builder::new()
+                    .pubkey(include_str!("../updater.pubkey").trim().to_owned())
+                    .build(),
+            )?;
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             greet,
             set_macos_file_tags,

@@ -14,6 +14,8 @@
     "fs:default",
     "fs:allow-read",
     "fs:allow-stat",
+    "process:default",
+    "updater:default",
     {
       "identifier": "fs:allow-read",
       "allow": [
