@@ -26,4 +26,4 @@ dist-ssr
 
 # Worklogs and temporary documents
 WORKLOG.md
-
+.worktrees/
