@@ -1,9 +1,12 @@
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { UploadCloud, Sparkles, X, Loader2, CheckCircle2, AlertCircle, Tag, FolderOpen, ExternalLink, CheckSquare, Square, Folder, FileImage, Camera, Info, ChevronLeft, ChevronRight, HardDrive, Settings, Download, Globe } from "lucide-react";
+import { getVersion } from "@tauri-apps/api/app";
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { revealItemInDir, openPath, openUrl } from '@tauri-apps/plugin-opener';
 import { readFile, readDir, stat } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
 import * as exifr from 'exifr';
 import "./App.css";
 import { AestheticCriteria, FileNode, ImageEvaluationResult, ProcessedImage, ExifData, LlmConfig, AestheticProfile } from './types';
@@ -15,7 +18,15 @@ import { manifestAestheticIntent, evaluateImages, critiqueImage, DEFAULT_PROFILE
 import { eraseImage } from "./utils/stabilityClient";
 import { useTranslation } from "react-i18next";
 import { ReactSketchCanvas, ReactSketchCanvasRef } from "react-sketch-canvas";
-import { useRef } from "react";
+import {
+  applyDownloadedUpdate,
+  createIdleUpdaterState,
+  getUpdateStatusKey,
+  runBackgroundUpdateCheck,
+  type ManagedUpdate,
+  type UpdateDownloadEvent,
+  type UpdaterState,
+} from "./utils/updater";
 
 export const DEFAULT_LLM_CONFIG: LlmConfig = createDefaultLlmConfig();
 
@@ -34,6 +45,9 @@ const getFilenameFromPath = (filePath: string) => filePath.split(/[/\\]/).pop() 
 
 function App() {
   const { t, i18n } = useTranslation();
+  const [appVersion, setAppVersion] = useState("0.1.0");
+  const [updaterState, setUpdaterState] = useState<UpdaterState>(createIdleUpdaterState());
+  const pendingUpdateRef = useRef<ManagedUpdate | null>(null);
 
   const [intent, setIntent] = useState("");
   const [images, setImages] = useState<Record<string, ProcessedImage>>({});
@@ -144,6 +158,90 @@ function App() {
   const [evaluations, setEvaluations] = useState<Record<string, ImageEvaluationResult>>({});
   const [imageCritiques, setImageCritiques] = useState<Record<string, string>>({});
   const [errorMsg, setErrorMsg] = useState("");
+
+  const handleBackgroundUpdateCheck = async () => {
+    const pendingUpdate = await runBackgroundUpdateCheck(
+      async () => {
+        const update = await check();
+        if (!update) {
+          return null;
+        }
+
+        return {
+          version: update.version,
+          currentVersion: update.currentVersion,
+          body: update.body,
+          download(onEvent) {
+            return update.download((event) => {
+              if (event.event === "Started") {
+                onEvent?.({
+                  event: "Started",
+                  data: { contentLength: event.data.contentLength },
+                } satisfies UpdateDownloadEvent);
+              } else if (event.event === "Progress") {
+                onEvent?.({
+                  event: "Progress",
+                  data: { chunkLength: event.data.chunkLength },
+                } satisfies UpdateDownloadEvent);
+              } else {
+                onEvent?.({ event: "Finished" });
+              }
+            });
+          },
+          install() {
+            return update.install();
+          },
+        } satisfies ManagedUpdate;
+      },
+      (nextState) => {
+        setUpdaterState(nextState);
+      },
+    );
+
+    pendingUpdateRef.current = pendingUpdate;
+  };
+
+  const handleInstallUpdate = async () => {
+    if (!pendingUpdateRef.current) {
+      return;
+    }
+
+    await applyDownloadedUpdate(
+      pendingUpdateRef.current,
+      async () => {
+        await relaunch();
+      },
+      (nextState) => {
+        setUpdaterState(nextState);
+      },
+    );
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const version = await getVersion();
+          if (!cancelled) {
+            setAppVersion(version);
+          }
+        } catch (error) {
+          console.error("Failed to resolve app version", error);
+        }
+
+        if (!cancelled) {
+          await handleBackgroundUpdateCheck();
+        }
+      })();
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, []);
 
   const processFilePaths = async (filePaths: string[]) => {
     setIsCompressing(true);
@@ -1569,7 +1667,7 @@ function App() {
               </div>
               <div>
                 <h3 className="text-xl font-bold text-neutral-100 flex items-center justify-center gap-2">
-                  Punkcan <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 text-xs font-mono border border-blue-500/20">v0.1.0</span>
+                  Punkcan <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 text-xs font-mono border border-blue-500/20">v{appVersion}</span>
                 </h3>
                 <p className="text-sm text-neutral-400 mt-1">AI-First Software Architect & Creator</p>
               </div>
@@ -1734,6 +1832,55 @@ function App() {
                       {t('settings.stabilityHint', { defaultValue: '填写此 Key 后即可激活大图浏览模式下的图片去水印擦除功能。' })}
                     </p>
                   </div>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-neutral-700/50 mt-4">
+                <h4 className="text-sm font-bold text-neutral-200 mb-3 flex items-center gap-2">
+                  <Download className="w-4 h-4 text-blue-400" />
+                  {t("updater.title")}
+                </h4>
+
+                {getUpdateStatusKey(updaterState) && (
+                  <p className="text-xs text-neutral-400 mb-3">
+                    {t(getUpdateStatusKey(updaterState)!, {
+                      version: updaterState.version,
+                      currentVersion: updaterState.currentVersion,
+                      downloadedBytes: updaterState.downloadedBytes ?? 0,
+                      contentLength: updaterState.contentLength ?? 0,
+                      error: updaterState.error ?? "",
+                    })}
+                  </p>
+                )}
+
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleBackgroundUpdateCheck();
+                    }}
+                    disabled={
+                      updaterState.phase === "checking" ||
+                      updaterState.phase === "downloading" ||
+                      updaterState.phase === "installing" ||
+                      updaterState.phase === "restarting"
+                    }
+                    className="px-4 py-2 rounded-xl text-sm font-medium bg-neutral-900 border border-neutral-700 text-neutral-200 disabled:opacity-50"
+                  >
+                    {t("updater.checkNow")}
+                  </button>
+
+                  {updaterState.phase === "ready" && pendingUpdateRef.current && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleInstallUpdate();
+                      }}
+                      className="px-4 py-2 rounded-xl text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white"
+                    >
+                      {t("updater.installNow")}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

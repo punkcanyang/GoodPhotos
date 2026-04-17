@@ -71,6 +71,15 @@ const resources = {
                 save: "Save",
                 interfaceLang: "Interface Language"
             },
+            updater: {
+                title: "App Updates",
+                checkNow: "Check for Updates",
+                installNow: "Restart to Update",
+                checking: "Checking for updates in the background...",
+                downloading: "Downloading {{version}} in the background ({{downloadedBytes}} / {{contentLength}} bytes)...",
+                ready: "Version {{version}} has been downloaded. Restart the app to apply it.",
+                error: "Update failed: {{error}}"
+            },
             tags: {
                 title: "Add Custom Tags",
                 placeholder: "Press Enter to add multiple tags",
@@ -216,6 +225,15 @@ const resources = {
                 cancel: "取消",
                 save: "保存设置",
                 interfaceLang: "界面语言 (Language)"
+            },
+            updater: {
+                title: "应用更新",
+                checkNow: "检查更新",
+                installNow: "重新启动并更新",
+                checking: "正在背景检查新版本...",
+                downloading: "正在背景下载 {{version}}（{{downloadedBytes}} / {{contentLength}} bytes）...",
+                ready: "版本 {{version}} 已下载完成，重新启动后即可套用。",
+                error: "更新失败：{{error}}"
             },
             tags: {
                 title: "添加自定义标签",
