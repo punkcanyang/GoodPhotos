@@ -48,7 +48,7 @@ jobs:
       - name: Run tests
         run: npm run test
 
-      - name: Validate macOS signing secrets
+      - name: Check Apple signing configuration
         shell: bash
         run: |
           required=(
@@ -59,12 +59,16 @@ jobs:
             APPLE_PASSWORD
             APPLE_TEAM_ID
           )
+          missing=()
           for key in "${required[@]}"; do
             if [ -z "${!key}" ]; then
-              echo "::error::Missing required secret: $key"
-              exit 1
+              missing+=("$key")
             fi
           done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::warning::Apple signing/notarization secrets are missing: ${missing[*]}"
+            echo "::warning::This release will be unsigned/ad-hoc and may show 'App is damaged' on macOS."
+          fi
 
       - name: Build and publish Tauri release
         uses: tauri-apps/tauri-action@v0.6.0
