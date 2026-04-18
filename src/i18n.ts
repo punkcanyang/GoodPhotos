@@ -74,7 +74,7 @@ const resources = {
             updater: {
                 title: "App Updates",
                 checkNow: "Check for Updates",
-                installNow: "Restart to Update",
+                installNow: "Restart Now",
                 checking: "Checking for updates in the background...",
                 downloading: "Downloading {{version}} in the background ({{downloadedBytes}} / {{contentLength}} bytes)...",
                 ready: "Version {{version}} has been downloaded. Restart the app to apply it.",
@@ -229,7 +229,7 @@ const resources = {
             updater: {
                 title: "应用更新",
                 checkNow: "检查更新",
-                installNow: "重新启动并更新",
+                installNow: "立即重启并更新",
                 checking: "正在背景检查新版本...",
                 downloading: "正在背景下载 {{version}}（{{downloadedBytes}} / {{contentLength}} bytes）...",
                 ready: "版本 {{version}} 已下载完成，重新启动后即可套用。",

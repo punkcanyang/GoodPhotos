@@ -217,6 +217,9 @@ function App() {
     );
   };
 
+  const isReadyToInstallUpdate =
+    updaterState.phase === "ready" && Boolean(pendingUpdateRef.current);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -1857,6 +1860,10 @@ function App() {
                   <button
                     type="button"
                     onClick={() => {
+                      if (isReadyToInstallUpdate) {
+                        void handleInstallUpdate();
+                        return;
+                      }
                       void handleBackgroundUpdateCheck();
                     }}
                     disabled={
@@ -1865,22 +1872,14 @@ function App() {
                       updaterState.phase === "installing" ||
                       updaterState.phase === "restarting"
                     }
-                    className="px-4 py-2 rounded-xl text-sm font-medium bg-neutral-900 border border-neutral-700 text-neutral-200 disabled:opacity-50"
+                    className={`px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-50 ${
+                      isReadyToInstallUpdate
+                        ? "bg-blue-600 hover:bg-blue-500 text-white"
+                        : "bg-neutral-900 border border-neutral-700 text-neutral-200"
+                    }`}
                   >
-                    {t("updater.checkNow")}
+                    {isReadyToInstallUpdate ? t("updater.installNow") : t("updater.checkNow")}
                   </button>
-
-                  {updaterState.phase === "ready" && pendingUpdateRef.current && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleInstallUpdate();
-                      }}
-                      className="px-4 py-2 rounded-xl text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white"
-                    >
-                      {t("updater.installNow")}
-                    </button>
-                  )}
                 </div>
               </div>
             </div>
