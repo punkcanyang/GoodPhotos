@@ -1,5 +1,5 @@
 import { ProcessedImage, ImageEvaluationResult } from '../types';
-import { invoke } from '@tauri-apps/api/core';
+import { mkdir, writeFile, writeTextFile } from '@tauri-apps/plugin-fs';
 
 export async function exportProofingGallery(
     imagesIdList: string[],
@@ -11,7 +11,7 @@ export async function exportProofingGallery(
 
     // 1. Create target directories
     try {
-        await invoke("create_dir_all", { dirPath: imagesPath });
+        await mkdir(imagesPath, { recursive: true });
     } catch (e: any) {
         throw new Error(`创建目录失败: ${e.toString()}`);
     }
@@ -36,13 +36,9 @@ export async function exportProofingGallery(
 
             const fileName = `${id}_${img.filename}`;
             try {
-                // In Tauri v2, Uint8Array / ArrayBuffer is automatically mapped to Vec<u8>
-                await invoke("write_binary_file", {
-                    filePath: `${imagesPath}/${fileName}`,
-                    content: Array.from(bytes)
-                });
+                await writeFile(`${imagesPath}/${fileName}`, bytes);
             } catch (e: any) {
-                console.error("write_binary_file error", e);
+                console.error("writeFile error", e);
                 // Don't throw, just skip this image instead of aborting the whole gallery
                 continue;
             }
@@ -62,10 +58,7 @@ export async function exportProofingGallery(
     // 3. Write Data JS
     const dataJsContent = `window.GALLERY_DATA = ${JSON.stringify(galleryData, null, 2)};`;
     try {
-        await invoke("write_text_file", {
-            filePath: `${targetDir}/data.js`,
-            content: dataJsContent
-        });
+        await writeTextFile(`${targetDir}/data.js`, dataJsContent);
     } catch (e: any) {
         throw new Error(`写入 data.js 失败: ${e.toString()}`);
     }
@@ -181,10 +174,7 @@ export async function exportProofingGallery(
 </body>
 </html>`;
     try {
-        await invoke("write_text_file", {
-            filePath: `${targetDir}/index.html`,
-            content: indexHtmlContent
-        });
+        await writeTextFile(`${targetDir}/index.html`, indexHtmlContent);
     } catch (e: any) {
         throw new Error(`写入 index.html 失败: ${e.toString()}`);
     }
@@ -195,4 +185,4 @@ export async function exportProofingGallery(
 // [For Future AI]
 // Assumptions: Relying on Base64 -> Uint8Array decoding to physically write `compresedBase64` data out to disk.
 // Edge Cases: Folder naming might clash if the user explicitly chooses a non-empty directory. Handled by allowing OS to merge files generally.
-// Dependencies: Tauri invoke "create_dir_all" and "write_binary_file".
+// Dependencies: Tauri fs runtime scope granted by the directory picker.

@@ -150,7 +150,7 @@ export function getProviderModels(provider: LlmProviderId): readonly string[] {
 }
 
 const DEFAULT_STABILITY_PROVIDER: ProviderConfig = {
-  apiKey: "",
+  hasCredential: false,
   baseUrl: "https://api.stability.ai/v2beta/stable-image/edit/erase",
   model: "erase",
 };
@@ -186,7 +186,7 @@ export function createDefaultLlmConfig(): LlmConfig {
     LLM_PROVIDER_OPTIONS.map((option) => [
       option.id,
       {
-        apiKey: "",
+        hasCredential: false,
         baseUrl: option.defaultBaseUrl,
         model: option.defaultModel,
       },
@@ -213,7 +213,7 @@ function mergeProviderConfig(
   const candidate = maybeConfig as Partial<ProviderConfig>;
 
   return {
-    apiKey: typeof candidate.apiKey === "string" ? candidate.apiKey : baseConfig.apiKey,
+    hasCredential: typeof candidate.hasCredential === "boolean" ? candidate.hasCredential : false,
     baseUrl: typeof candidate.baseUrl === "string" ? candidate.baseUrl : baseConfig.baseUrl,
     model: typeof candidate.model === "string" ? candidate.model : baseConfig.model,
   };

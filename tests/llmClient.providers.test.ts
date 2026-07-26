@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { manifestAestheticIntent } from "../src/utils/llmClient";
 import type { LlmConfig } from "../src/types";
+import { mergeLlmConfigWithDefaults } from "../src/llmProviders";
 
 const providerCases = [
   {
@@ -27,42 +28,42 @@ function makeConfig(provider: (typeof providerCases)[number]["provider"]): LlmCo
     activeProvider: provider as LlmConfig["activeProvider"],
     providers: {
       qwen: {
-        apiKey: "",
+        hasCredential: false,
         baseUrl: "",
         model: "qwen-vl-max",
       },
       openai: {
-        apiKey: "",
+        hasCredential: false,
         baseUrl: "",
         model: "gpt-4o",
       },
       gemini: {
-        apiKey: "",
+        hasCredential: false,
         baseUrl: "",
         model: "gemini-1.5-pro",
       },
       openrouter: {
-        apiKey: "test-key",
+        hasCredential: true,
         baseUrl: "",
         model: "openai/gpt-4.1-mini",
       },
       siliconflow: {
-        apiKey: "test-key",
+        hasCredential: true,
         baseUrl: "",
         model: "Qwen/Qwen2.5-VL-72B-Instruct",
       },
       together: {
-        apiKey: "test-key",
+        hasCredential: true,
         baseUrl: "",
         model: "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
       },
       groq: {
-        apiKey: "test-key",
+        hasCredential: true,
         baseUrl: "",
         model: "meta-llama/llama-4-scout-17b-16e-instruct",
       },
       stability: {
-        apiKey: "",
+        hasCredential: false,
         baseUrl: "",
         model: "erase",
       },
@@ -119,9 +120,25 @@ async function testCompatibleProvidersUseDefaultUrls(): Promise<void> {
   }
 }
 
+function testLegacyKeysAreNotKeptInFrontendConfig(): void {
+  const merged = mergeLlmConfigWithDefaults({
+    activeProvider: "qwen",
+    providers: {
+      qwen: {
+        apiKey: "must-not-survive",
+        baseUrl: "https://example.com/v1",
+        model: "qwen-vl-max",
+      },
+    },
+  });
+  assert.equal(JSON.stringify(merged).includes("must-not-survive"), false);
+  assert.equal("apiKey" in merged.providers.qwen, false);
+}
+
 async function main(): Promise<void> {
-  await testCompatibleProvidersUseDefaultUrls();
-  console.log("llmClient provider tests passed");
+await testCompatibleProvidersUseDefaultUrls();
+testLegacyKeysAreNotKeptInFrontendConfig();
+console.log("llmClient provider tests passed");
 }
 
 main().catch((error) => {

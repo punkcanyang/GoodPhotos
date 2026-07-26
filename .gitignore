@@ -27,3 +27,8 @@ dist-ssr
 # Worklogs and temporary documents
 WORKLOG.md
 .worktrees/
+
+# Private backend repo should never be nested into this public repo
+goodphotos-billing-backend/
+billing-backend/
+backend-private/

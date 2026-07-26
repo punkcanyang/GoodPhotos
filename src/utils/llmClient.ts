@@ -5,6 +5,7 @@
  */
 
 import { AestheticCriteria, ImageEvaluationResult, ProcessedImage, LlmConfig, AestheticProfile } from "../types";
+import { invoke } from "@tauri-apps/api/core";
 import {
     getProviderOption,
     isGeminiProvider,
@@ -94,11 +95,44 @@ const getLlmContext = (config?: LlmConfig) => {
     let url = pConf.baseUrl.trim();
     if (!url) url = providerOption.defaultBaseUrl;
 
-    let key = pConf.apiKey.trim();
-    if (!key && provider === "qwen") key = import.meta.env.VITE_QWEN_API_KEY || "";
-    if (!key) throw new Error(`API Key is missing for ${provider}. Please set it in the Settings panel.`);
+    if (!pConf.hasCredential) throw new Error(`API Key is missing for ${provider}. Please set it in the Settings panel.`);
 
-    return { provider, url, key, model: pConf.model };
+    return { provider, url, model: pConf.model };
+};
+
+type LlmContext = ReturnType<typeof getLlmContext>;
+
+interface BackendHttpResponse {
+    status: number;
+    statusText: string;
+    body: string;
+    headers: Record<string, string>;
+}
+
+const providerFetch = async (ctx: LlmContext, body: unknown): Promise<Response> => {
+    const endpoint = isGeminiProvider(ctx.provider)
+        ? `${ctx.url}/${ctx.model}:generateContent`
+        : ctx.url;
+
+    // Node 單元測試沒有 Tauri runtime；正式 WebView 一律由 Rust 取用系統憑證。
+    if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+        return fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+    }
+
+    const response = await invoke<BackendHttpResponse>("provider_http_request", {
+        provider: ctx.provider,
+        url: endpoint,
+        body,
+    });
+    return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+    });
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -205,14 +239,10 @@ export const manifestAestheticIntent = async (userIntent: string, config: LlmCon
 CRITICAL: You must translate the JSON values and output all text content inside the JSON in the following language: ${langInstruction}. The JSON keys must remain exact strings as specified above.`;
 
     if (isGeminiProvider(ctx.provider)) {
-        const response = await fetch(`${ctx.url}/${ctx.model}:generateContent?key=${ctx.key}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+        const response = await providerFetch(ctx, {
                 systemInstruction: { parts: [{ text: "You are an API that strictly returns valid JSON." }] },
                 contents: [{ role: "user", parts: [{ text: systemPrompt }] }],
                 generationConfig: { responseMimeType: "application/json" }
-            })
         });
 
         if (!response.ok) throw new Error(`Gemini Error: ${await response.text()}`);
@@ -231,14 +261,7 @@ CRITICAL: You must translate the JSON values and output all text content inside 
             payload.response_format = { type: "json_object" };
         }
 
-        const response = await fetch(ctx.url, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${ctx.key}`,
-            },
-            body: JSON.stringify(payload)
-        });
+        const response = await providerFetch(ctx, payload);
 
         if (!response.ok) throw new Error(`API Error: ${await response.text()}`);
         const data = await response.json();
@@ -319,10 +342,7 @@ CRITICAL: You must output the content of the \`reasoning\` field in the followin
                 }
             }
 
-            const response = await fetch(`${ctx.url}/${ctx.model}:generateContent?key=${ctx.key}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
+            const response = await providerFetch(ctx, {
                     systemInstruction: { parts: [{ text: "You are an API that strictly returns valid JSON arrays." }] },
                     contents: [{ role: "user", parts }],
                     generationConfig: {
@@ -342,7 +362,6 @@ CRITICAL: You must output the content of the \`reasoning\` field in the followin
                             }
                         }
                     }
-                })
             });
 
             if (!response.ok) throw new Error(`Gemini evaluation failed: ${await response.text()}`);
@@ -371,14 +390,7 @@ CRITICAL: You must output the content of the \`reasoning\` field in the followin
                 let attemptIndex = 0;
 
                 while (true) {
-                    const response = await fetch(ctx.url, {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                            "Authorization": `Bearer ${ctx.key}`,
-                        },
-                        body: JSON.stringify(payload)
-                    });
+                    const response = await providerFetch(ctx, payload);
 
                     if (response.status === 429) {
                         const responseText = await response.text();
@@ -412,14 +424,7 @@ CRITICAL: You must output the content of the \`reasoning\` field in the followin
                 }
             }
 
-            const response = await fetch(ctx.url, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${ctx.key}`,
-                },
-                body: JSON.stringify(payload)
-            });
+            const response = await providerFetch(ctx, payload);
 
             if (!response.ok) throw new Error(`API evaluation failed: ${await response.text()}`);
             const data = await response.json();
@@ -481,13 +486,9 @@ CRITICAL: You must output all your suggestions entirely in the following languag
             parts.push({ inlineData: { mimeType: partsMatch[1], data: partsMatch[2] } });
         }
 
-        const response = await fetch(`${ctx.url}/${ctx.model}:generateContent?key=${ctx.key}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+        const response = await providerFetch(ctx, {
                 contents: [{ role: "user", parts }],
                 generationConfig: { temperature: 0.5, topP: 0.8 }
-            })
         });
 
         if (!response.ok) throw new Error(`Gemini critique failed: ${await response.text()}`);
@@ -499,13 +500,7 @@ CRITICAL: You must output all your suggestions entirely in the following languag
             { type: "image_url", image_url: { url: base64Image } }
         ];
 
-        const response = await fetch(ctx.url, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${ctx.key}`,
-            },
-            body: JSON.stringify({
+        const response = await providerFetch(ctx, {
                 model: ctx.model,
                 temperature: 0.5,
                 top_p: 0.8,
@@ -513,7 +508,6 @@ CRITICAL: You must output all your suggestions entirely in the following languag
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userContent }
                 ]
-            })
         });
 
         if (!response.ok) throw new Error(`API critique failed: ${await response.text()}`);

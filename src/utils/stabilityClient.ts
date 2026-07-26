@@ -5,26 +5,7 @@
  */
 
 import { LlmConfig } from "../types";
-
-/**
- * Converts a Base64 string to a Blob object for structured File uploading.
- */
-function base64ToBlob(base64: string): Blob {
-    const parts = base64.split(';base64,');
-    let contentType = parts[0].split(':')[1];
-    let raw = window.atob(parts[1]);
-
-    // Stability AI often requires specific image formats. Default to PNG if missing.
-    if (!contentType) {
-        contentType = 'image/png';
-    }
-
-    const uInt8Array = new Uint8Array(raw.length);
-    for (let i = 0; i < raw.length; ++i) {
-        uInt8Array[i] = raw.charCodeAt(i);
-    }
-    return new Blob([uInt8Array], { type: contentType });
-}
+import { invoke } from "@tauri-apps/api/core";
 
 /**
  * Invokes Stability AI's `erase` endpoint to remove unwanted objects based on a provided generic image and a mask.
@@ -36,56 +17,17 @@ function base64ToBlob(base64: string): Blob {
 export async function eraseImage(imageBase64: string, maskBase64: string, config: LlmConfig): Promise<string> {
     const provider = config.providers.stability;
 
-    if (!provider || !provider.apiKey) {
+    if (!provider || !provider.hasCredential) {
         throw new Error("Stability AI API Key is not configured. Please add it in Settings.");
     }
 
     const baseUrl = provider.baseUrl || "https://api.stability.ai/v2beta/stable-image/edit/erase";
 
-    // Prepare FormData
-    const formData = new FormData();
-    formData.append('image', base64ToBlob(imageBase64), 'image.png');
-    formData.append('mask', base64ToBlob(maskBase64), 'mask.png');
-    formData.append('output_format', 'webp'); // WebP offers good compression for the frontend
-
-    const response = await fetch(baseUrl, {
-        method: "POST",
-        headers: {
-            "Authorization": `Bearer ${provider.apiKey}`,
-            "Accept": "image/*"
-        },
-        body: formData
+    return invoke<string>("erase_image", {
+        imageBase64,
+        maskBase64,
+        baseUrl,
     });
-
-    if (!response.ok) {
-        let errorMsg = `Stability API Error: ${response.status} ${response.statusText}`;
-        try {
-            const errorData = await response.json();
-            if (errorData && errorData.errors) {
-                errorMsg = `Stability API Error: ${errorData.errors.join(', ')}`;
-            } else if (errorData && errorData.message) {
-                errorMsg = `Stability API Error: ${errorData.message}`;
-            }
-        } catch {
-            // Ignored, response is not JSON
-            const textData = await response.text();
-            if (textData) errorMsg += ` - ${textData}`;
-        }
-        throw new Error(errorMsg);
-    }
-
-    // The endpoint returns binary image data when successful, assuming 'Accept: image/*'
-    const arrayBuffer = await response.arrayBuffer();
-    const bytes = new Uint8Array(arrayBuffer);
-
-    // Convert to base64
-    let binary = '';
-    for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
-    }
-    const resultBase64 = `data:image/webp;base64,${window.btoa(binary)}`;
-
-    return resultBase64;
 }
 
 // [For Future AI]

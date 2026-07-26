@@ -1,11 +1,26 @@
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+mod credentials;
+mod network;
+mod xmp;
+
+use std::path::Path;
+use tauri::AppHandle;
+use tauri_plugin_fs::FsExt;
+
+fn ensure_scoped(app: &AppHandle, file_path: &str) -> Result<(), String> {
+    if app.fs_scope().is_allowed(Path::new(file_path)) {
+        Ok(())
+    } else {
+        Err("此檔案不在使用者透過檔案對話框授權的範圍內".into())
+    }
 }
 
 #[tauri::command]
-async fn set_macos_file_tags(file_path: String, tags: Vec<String>) -> Result<(), String> {
+async fn set_macos_file_tags(
+    app: AppHandle,
+    file_path: String,
+    tags: Vec<String>,
+) -> Result<(), String> {
+    ensure_scoped(&app, &file_path)?;
     #[cfg(target_os = "macos")]
     {
         // For macOS Finder tags, we write an array to `com.apple.metadata:_kMDItemUserTags`
@@ -36,7 +51,8 @@ async fn set_macos_file_tags(file_path: String, tags: Vec<String>) -> Result<(),
 }
 
 #[tauri::command]
-async fn get_macos_file_tags(file_path: String) -> Result<Vec<String>, String> {
+async fn get_macos_file_tags(app: AppHandle, file_path: String) -> Result<Vec<String>, String> {
+    ensure_scoped(&app, &file_path)?;
     #[cfg(target_os = "macos")]
     {
         let plist_bytes = xattr::get(&file_path, "com.apple.metadata:_kMDItemUserTags")
@@ -58,39 +74,19 @@ async fn get_macos_file_tags(file_path: String) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-async fn read_file_bytes(file_path: String) -> Result<Vec<u8>, String> {
-    std::fs::read(&file_path).map_err(|e| format!("Failed to read file on backend: {}", e))
-}
-
-#[tauri::command]
-async fn write_text_file(file_path: String, content: String) -> Result<(), String> {
-    std::fs::write(&file_path, content)
-        .map_err(|e| format!("Failed to write text file on backend: {}", e))
-}
-
-#[tauri::command]
-async fn write_binary_file(file_path: String, content: Vec<u8>) -> Result<(), String> {
-    std::fs::write(&file_path, content)
-        .map_err(|e| format!("Failed to write binary file on backend: {}", e))
-}
-
-#[tauri::command]
-async fn copy_file(from_path: String, to_path: String) -> Result<(), String> {
-    std::fs::copy(&from_path, &to_path)
-        .map(|_| ())
-        .map_err(|e| format!("Failed to copy file on backend: {}", e))
-}
-
-#[tauri::command]
-async fn create_dir_all(dir_path: String) -> Result<(), String> {
-    std::fs::create_dir_all(&dir_path)
-        .map_err(|e| format!("Failed to create directory on backend: {}", e))
+async fn write_xmp_rating(
+    app: AppHandle,
+    original_file_path: String,
+    score: f64,
+) -> Result<String, String> {
+    ensure_scoped(&app, &original_file_path)?;
+    xmp::write_rating(Path::new(&original_file_path), score)
+        .map(|path| path.to_string_lossy().into_owned())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -106,14 +102,14 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            greet,
             set_macos_file_tags,
             get_macos_file_tags,
-            read_file_bytes,
-            write_text_file,
-            write_binary_file,
-            copy_file,
-            create_dir_all
+            write_xmp_rating,
+            credentials::api_key_status,
+            credentials::store_api_key,
+            credentials::delete_api_key,
+            network::provider_http_request,
+            network::erase_image
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

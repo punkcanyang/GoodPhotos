@@ -14,42 +14,42 @@ const config: LlmConfig = {
   activeProvider: "openai",
   providers: {
     openai: {
-      apiKey: "test-key",
+      hasCredential: true,
       baseUrl: "https://example.com/v1/chat/completions",
       model: "gpt-4o",
     },
     qwen: {
-      apiKey: "",
+      hasCredential: false,
       baseUrl: "",
       model: "qwen-vl-max",
     },
     gemini: {
-      apiKey: "",
+      hasCredential: false,
       baseUrl: "",
       model: "gemini-1.5-pro",
     },
     openrouter: {
-      apiKey: "",
+      hasCredential: false,
       baseUrl: "",
       model: "openai/gpt-4.1-mini",
     },
     siliconflow: {
-      apiKey: "",
+      hasCredential: false,
       baseUrl: "",
       model: "Qwen/Qwen2.5-VL-72B-Instruct",
     },
     together: {
-      apiKey: "",
+      hasCredential: false,
       baseUrl: "",
       model: "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
     },
     groq: {
-      apiKey: "",
+      hasCredential: false,
       baseUrl: "",
       model: "meta-llama/llama-4-scout-17b-16e-instruct",
     },
     stability: {
-      apiKey: "",
+      hasCredential: false,
       baseUrl: "",
       model: "stable-image-edit",
     },

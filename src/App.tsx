@@ -3,7 +3,7 @@ import { UploadCloud, Sparkles, X, Loader2, CheckCircle2, AlertCircle, Tag, Fold
 import { getVersion } from "@tauri-apps/api/app";
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { revealItemInDir, openPath, openUrl } from '@tauri-apps/plugin-opener';
-import { readFile, readDir, stat } from '@tauri-apps/plugin-fs';
+import { copyFile, readFile, readDir, stat, writeFile } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
@@ -12,7 +12,6 @@ import "./App.css";
 import { AestheticCriteria, FileNode, ImageEvaluationResult, ProcessedImage, ExifData, LlmConfig, AestheticProfile } from './types';
 import { LLM_PROVIDER_OPTIONS, createDefaultLlmConfig, mergeLlmConfigWithDefaults, getProviderModels } from "./llmProviders";
 import { compressImageToBase64 } from "./utils/imageProcessor";
-import { generateXmpData } from "./utils/xmpGenerator";
 import { exportProofingGallery } from "./utils/galleryExporter";
 import { manifestAestheticIntent, evaluateImages, critiqueImage, DEFAULT_PROFILES } from "./utils/llmClient";
 import { eraseImage } from "./utils/stabilityClient";
@@ -66,6 +65,10 @@ function App() {
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [llmConfig, setLlmConfig] = useState<LlmConfig>(() => createDefaultLlmConfig());
   const [tempLlmConfig, setTempLlmConfig] = useState<LlmConfig>(() => createDefaultLlmConfig());
+  const [pendingApiKeys, setPendingApiKeys] = useState<Record<string, string>>({});
+  const [errorMsg, setErrorMsg] = useState("");
+  const settingsDialogRef = useRef<HTMLDivElement>(null);
+  const settingsTriggerRef = useRef<HTMLButtonElement>(null);
 
   // Gallery view states
   const [enlargedImageId, setEnlargedImageId] = useState<string | null>(null);
@@ -116,25 +119,47 @@ function App() {
       console.error("Failed to load recent tags", e);
     }
 
-    try {
-      const storedConfig = localStorage.getItem('goodphoto_llm_config');
-      if (storedConfig) {
-        const mergedConfig = mergeLlmConfigWithDefaults(JSON.parse(storedConfig));
+    void (async () => {
+      try {
+        const storedConfig = localStorage.getItem('goodphoto_llm_config');
+        const parsedConfig = storedConfig ? JSON.parse(storedConfig) : null;
+        const mergedConfig = mergeLlmConfigWithDefaults(parsedConfig);
+        if (!("__TAURI_INTERNALS__" in window)) {
+          setLlmConfig(mergedConfig);
+          setTempLlmConfig(mergedConfig);
+          return;
+        }
+        const providerIds = [...LLM_PROVIDER_OPTIONS.map(option => option.id), "stability"];
+        const legacyKeys = new Map<string, string>();
+
+        for (const provider of providerIds) {
+          const value = parsedConfig?.providers?.[provider]?.apiKey;
+          if (typeof value === "string" && value.trim()) legacyKeys.set(provider, value);
+        }
+        const oldKey = localStorage.getItem('goodphoto_api_key');
+        if (oldKey?.trim() && !legacyKeys.has("qwen")) legacyKeys.set("qwen", oldKey);
+
+        for (const [provider, apiKey] of legacyKeys) {
+          await invoke("store_api_key", {
+            provider,
+            apiKey,
+            allowedUrl: mergedConfig.providers[provider as keyof typeof mergedConfig.providers].baseUrl,
+          });
+        }
+        for (const provider of providerIds) {
+          mergedConfig.providers[provider as keyof typeof mergedConfig.providers].hasCredential =
+            await invoke<boolean>("api_key_status", { provider });
+        }
+
         setLlmConfig(mergedConfig);
         setTempLlmConfig(mergedConfig);
-      } else {
-        // Migration from old single key
-        const oldKey = localStorage.getItem('goodphoto_api_key');
-        if (oldKey) {
-          const migrated: LlmConfig = createDefaultLlmConfig();
-          migrated.providers.qwen.apiKey = oldKey;
-          setLlmConfig(migrated);
-          setTempLlmConfig(migrated);
-          localStorage.setItem('goodphoto_llm_config', JSON.stringify(migrated));
-          localStorage.removeItem('goodphoto_api_key'); // clear legacy
-        }
+        localStorage.setItem('goodphoto_llm_config', JSON.stringify(mergedConfig));
+        if (legacyKeys.size > 0) localStorage.removeItem('goodphoto_api_key');
+      } catch (e) {
+        console.error("Failed to migrate/load LLM config", e);
+        setErrorMsg(`API 金鑰移轉至系統憑證庫失敗：${String(e)}`);
       }
-    } catch (e) { console.error("Failed to load llm config", e); }
+    })();
 
     try {
       const storedCustomProfile = localStorage.getItem('goodphoto_custom_profile');
@@ -153,11 +178,56 @@ function App() {
     } catch (e) { console.error("Failed to load profile config", e); }
   }, []);
 
+  useEffect(() => {
+    if (!isSettingsOpen) return;
+    const dialog = settingsDialogRef.current;
+    const previousFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : settingsTriggerRef.current;
+    const focusableSelector = [
+      "button:not([disabled])",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+      "[tabindex]:not([tabindex='-1'])",
+    ].join(",");
+    const focusables = () => Array.from(
+      dialog?.querySelectorAll<HTMLElement>(focusableSelector) ?? [],
+    );
+    focusables()[0]?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setIsSettingsOpen(false);
+        setTempLlmConfig(llmConfig);
+        setPendingApiKeys({});
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = focusables();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previousFocus?.focus();
+    };
+  }, [isSettingsOpen]);
+
   // Results
   const [criteria, setCriteria] = useState<AestheticCriteria | null>(null);
   const [evaluations, setEvaluations] = useState<Record<string, ImageEvaluationResult>>({});
   const [imageCritiques, setImageCritiques] = useState<Record<string, string>>({});
-  const [errorMsg, setErrorMsg] = useState("");
 
   const handleBackgroundUpdateCheck = async () => {
     const pendingUpdate = await runBackgroundUpdateCheck(
@@ -339,15 +409,11 @@ function App() {
       const image = images[id];
       if (!image) continue;
 
-      const xmpContent = generateXmpData(evaluation.score);
-      const lastDotIndex = image.originalFilePath.lastIndexOf('.');
-      let xmpPath = image.originalFilePath + ".xmp";
-      if (lastDotIndex > image.originalFilePath.lastIndexOf('/')) {
-        xmpPath = image.originalFilePath.substring(0, lastDotIndex) + ".xmp";
-      }
-
       try {
-        await invoke("write_text_file", { filePath: xmpPath, content: xmpContent });
+        await invoke("write_xmp_rating", {
+          originalFilePath: image.originalFilePath,
+          score: evaluation.score,
+        });
         successCount++;
       } catch (e: any) {
         console.error("Failed to write XMP:", e);
@@ -426,9 +492,7 @@ function App() {
 
       if (isImage) {
         try {
-          // Bypass Tauri fs plugin sandbox for deep subfolders
-          const fileData = await invoke<number[]>("read_file_bytes", { filePath: path });
-          const u8arr = new Uint8Array(fileData);
+          const u8arr = await readFile(path);
           const blob = new Blob([u8arr]);
           objectUrl = URL.createObjectURL(blob);
           const parsed = await exifr.parse(blob).catch((e) => {
@@ -754,7 +818,7 @@ function App() {
     if (!enlargedImageId || !canvasRef.current || isErasing) return;
 
     // Check if stability API is configured
-    if (!llmConfig.providers.stability?.apiKey) {
+    if (!llmConfig.providers.stability?.hasCredential) {
       setErrorMsg("请先在设置中配置 Stability AI API Key 以启用去水印功能。");
       setIsSettingsOpen(true);
       return;
@@ -839,10 +903,7 @@ function App() {
           bytes[i] = binaryString.charCodeAt(i);
         }
 
-        await invoke("write_binary_file", {
-          filePath: newFilePath,
-          content: Array.from(bytes)
-        });
+        await writeFile(newFilePath, bytes);
 
         setImages(prev => ({
           ...prev,
@@ -1021,7 +1082,7 @@ function App() {
         const filename = images[id].filename;
         const destPath = `${destDir}/${filename}`;
 
-        await invoke("copy_file", { fromPath: sourcePath, toPath: destPath });
+        await copyFile(sourcePath, destPath);
       }
 
       setErrorMsg(`已完成！成功移动 ${selectedIds.size} 张照片。`);
@@ -1030,6 +1091,42 @@ function App() {
       setIsSelectMode(false);
       setSelectedIds(new Set());
     });
+  };
+
+  const handleDeleteCredential = async (provider: string) => {
+    try {
+      await invoke("delete_api_key", { provider });
+      setPendingApiKeys(current => ({ ...current, [provider]: "" }));
+      setTempLlmConfig(current => {
+        const next = mergeLlmConfigWithDefaults(current);
+        next.providers[provider as keyof typeof next.providers].hasCredential = false;
+        return next;
+      });
+    } catch (error) {
+      setErrorMsg(`無法刪除 API 金鑰：${String(error)}`);
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    try {
+      const next = mergeLlmConfigWithDefaults(tempLlmConfig);
+      for (const [provider, apiKey] of Object.entries(pendingApiKeys)) {
+        if (!apiKey.trim()) continue;
+        await invoke("store_api_key", {
+          provider,
+          apiKey,
+          allowedUrl: next.providers[provider as keyof typeof next.providers].baseUrl,
+        });
+        next.providers[provider as keyof typeof next.providers].hasCredential = true;
+      }
+      setPendingApiKeys({});
+      setLlmConfig(next);
+      setTempLlmConfig(next);
+      localStorage.setItem('goodphoto_llm_config', JSON.stringify(next));
+      setIsSettingsOpen(false);
+    } catch (error) {
+      setErrorMsg(`無法儲存 API 金鑰：${String(error)}`);
+    }
   };
 
   return (
@@ -1057,7 +1154,7 @@ function App() {
                 <button onClick={() => setIsInfoOpen(true)} className="text-xs text-neutral-400 hover:text-neutral-300 p-1 hover:bg-neutral-700/50 rounded transition-colors whitespace-nowrap" title="关于 / Info">
                   <Info className="w-4" />
                 </button>
-                <button onClick={() => setIsSettingsOpen(true)} className="text-xs text-neutral-400 hover:text-neutral-300 p-1 hover:bg-neutral-700/50 rounded transition-colors whitespace-nowrap" title="偏好设置">
+                <button ref={settingsTriggerRef} onClick={() => setIsSettingsOpen(true)} className="text-xs text-neutral-400 hover:text-neutral-300 p-1 hover:bg-neutral-700/50 rounded transition-colors whitespace-nowrap" title="偏好设置">
                   <Settings className="w-4" />
                 </button>
               </div>
@@ -1695,14 +1792,24 @@ function App() {
 
       {/* Settings Modal */}
       {isSettingsOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center animate-in fade-in">
-          <div className="bg-neutral-800 border border-neutral-700 p-6 rounded-2xl shadow-2xl w-[500px] max-w-[90vw]">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-start justify-center overflow-y-auto p-4 sm:p-6 animate-in fade-in">
+          <div
+            ref={settingsDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-dialog-title"
+            className="bg-neutral-800 border border-neutral-700 rounded-2xl shadow-2xl w-[500px] max-w-[90vw] max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden"
+          >
+            <div className="p-6 pb-4 shrink-0">
             <h3 className="text-lg font-bold text-neutral-100 mb-2 flex items-center gap-2">
+              <span id="settings-dialog-title" className="contents">
               <Settings className="w-5 h-5 text-neutral-400" /> {t('settings.title')}
+              </span>
             </h3>
-            <p className="text-xs text-neutral-400 mb-6">{t('settings.subtitle')}</p>
+            <p className="text-xs text-neutral-400">{t('settings.subtitle')}</p>
+            </div>
 
-            <div className="space-y-4 mb-6">
+            <div className="space-y-4 overflow-y-auto px-6 pb-6 flex-1 min-h-0">
               <div>
                 <label className="block text-sm font-medium text-neutral-300 mb-2">{t('settings.interfaceLang')}</label>
                 <select
@@ -1784,14 +1891,23 @@ function App() {
                 <input
                   type="password"
                   className="w-full bg-neutral-900 border border-neutral-700 focus:border-blue-500 rounded-xl p-3 text-neutral-100 outline-none"
-                  placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-                  value={tempLlmConfig.providers[tempLlmConfig.activeProvider].apiKey}
-                  onChange={e => {
-                    const updated = { ...tempLlmConfig };
-                    updated.providers[updated.activeProvider].apiKey = e.target.value;
-                    setTempLlmConfig(updated);
-                  }}
+                  autoComplete="off"
+                  placeholder={tempLlmConfig.providers[tempLlmConfig.activeProvider].hasCredential ? "已安全儲存在系統憑證庫；輸入可更新" : "輸入 API 金鑰"}
+                  value={pendingApiKeys[tempLlmConfig.activeProvider] || ""}
+                  onChange={e => setPendingApiKeys(current => ({
+                    ...current,
+                    [tempLlmConfig.activeProvider]: e.target.value,
+                  }))}
                 />
+                {tempLlmConfig.providers[tempLlmConfig.activeProvider].hasCredential && (
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteCredential(tempLlmConfig.activeProvider)}
+                    className="mt-2 text-xs text-red-300 hover:text-red-200"
+                  >
+                    刪除系統憑證庫中的金鑰
+                  </button>
+                )}
               </div>
 
               <div>
@@ -1820,17 +1936,20 @@ function App() {
                     <input
                       type="password"
                       className="w-full bg-neutral-900 border border-neutral-700 focus:border-purple-500 rounded-xl p-3 text-neutral-100 outline-none"
-                      placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-                      value={tempLlmConfig.providers.stability?.apiKey || ""}
-                      onChange={e => {
-                        const updated = { ...tempLlmConfig };
-                        if (!updated.providers.stability) {
-                          updated.providers.stability = { apiKey: "", baseUrl: "https://api.stability.ai/v2beta/stable-image/edit/erase", model: "erase" };
-                        }
-                        updated.providers.stability.apiKey = e.target.value;
-                        setTempLlmConfig(updated);
-                      }}
+                      autoComplete="off"
+                      placeholder={tempLlmConfig.providers.stability.hasCredential ? "已安全儲存在系統憑證庫；輸入可更新" : "輸入 Stability API 金鑰"}
+                      value={pendingApiKeys.stability || ""}
+                      onChange={e => setPendingApiKeys(current => ({ ...current, stability: e.target.value }))}
                     />
+                    {tempLlmConfig.providers.stability.hasCredential && (
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteCredential("stability")}
+                        className="mt-2 text-xs text-red-300 hover:text-red-200"
+                      >
+                        刪除系統憑證庫中的金鑰
+                      </button>
+                    )}
                     <p className="text-xs text-neutral-500 mt-2">
                       {t('settings.stabilityHint', { defaultValue: '填写此 Key 后即可激活大图浏览模式下的图片去水印擦除功能。' })}
                     </p>
@@ -1884,22 +2003,19 @@ function App() {
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-3">
+            <div className="flex items-center justify-end gap-3 border-t border-neutral-700 p-6 pt-4 shrink-0 bg-neutral-800">
               <button
                 onClick={() => {
                   setIsSettingsOpen(false);
                   setTempLlmConfig(llmConfig); // re-sync
+                  setPendingApiKeys({});
                 }}
                 className="px-4 py-2 rounded-xl text-sm font-medium text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700 transition"
               >
                 {t('settings.cancel')}
               </button>
               <button
-                onClick={() => {
-                  setLlmConfig(tempLlmConfig);
-                  localStorage.setItem('goodphoto_llm_config', JSON.stringify(tempLlmConfig));
-                  setIsSettingsOpen(false);
-                }}
+                onClick={() => void handleSaveSettings()}
                 className="px-6 py-2 rounded-xl text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/50 transition"
               >
                 {t('settings.save')}

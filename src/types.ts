@@ -202,7 +202,7 @@ export interface FileNode {
 }
 
 export interface ProviderConfig {
-    apiKey: string;
+    hasCredential: boolean;
     baseUrl: string;
     model: string;
 }

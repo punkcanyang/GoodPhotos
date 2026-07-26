@@ -88,6 +88,13 @@ cp .env.example .env
 npm run tauri dev
 ```
 
+### 雙 Repo 協作文件（會員/儲值分離開發）
+- [協作入口](./docs/dual-repo/README.md)
+- [架構決策（跨 repo）](./docs/dual-repo/shared/ARCHITECTURE.md)
+- [API 契約（跨 repo）](./docs/dual-repo/shared/API-CONTRACT.md)
+- [Codex 開工清單](./docs/dual-repo/CODEX-SESSION-CHECKLIST.md)
+- [工作區佈局指南](./docs/dual-repo/WORKSPACE-GUIDE.md)
+
 ---
 > [!NOTE] 
 > **声明**：本应用不直接存储或向未经授权的第三方倒卖您的原片资产。发往远端接口用于智能判断的均为由客户端本地临时降采样处理后的 Base64 数据图层。

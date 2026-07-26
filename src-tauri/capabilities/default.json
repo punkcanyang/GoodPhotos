@@ -12,38 +12,11 @@
     "opener:allow-reveal-item-in-dir",
     "dialog:default",
     "fs:default",
-    "fs:allow-read",
-    "fs:allow-stat",
+    "fs:read-files",
+    "fs:read-dirs",
+    "fs:write-files",
+    "fs:allow-mkdir",
     "process:default",
-    "updater:default",
-    {
-      "identifier": "fs:allow-read",
-      "allow": [
-        {
-          "path": "$HOME/**"
-        },
-        {
-          "path": "/**"
-        },
-        {
-          "path": "**/*"
-        }
-      ]
-    },
-    {
-      "identifier": "fs:allow-stat",
-      "allow": [
-        {
-          "path": "$HOME/**"
-        },
-        {
-          "path": "/**"
-        },
-        {
-          "path": "**/*"
-        }
-      ]
-    },
-    "fs:read-all"
+    "updater:default"
   ]
 }
