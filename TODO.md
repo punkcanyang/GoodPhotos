@@ -87,10 +87,12 @@
   - 完成（2026-07-26）：刪除可接受任意路徑的讀、寫、複製、建目錄 commands，前端改用 dialog runtime scope 下的 Tauri fs API；Finder tag 與 XMP commands 先檢查 `fs_scope`。移除 shell plugin、`/**`/`**/*`/`fs:read-all`，並啟用限制自身資源、IPC 與本機圖片來源的 CSP。
   - 驗證紀錄：`cargo test --lib` 與 production build 通過；capability 不再包含全域路徑，`tauri.conf.json` 不再使用 `csp: null`，未授權自訂 command 由 scope check 拒絕。
 
-- [ ] **REV-P0-03：修正匯出選片頁的持久型 HTML injection**
+- [x] **REV-P0-03：修正匯出選片頁的持久型 HTML injection**
   - 證據：`src/utils/galleryExporter.ts:151-166` 把檔名與模型回傳的 `reasoning` 直接插入 `innerHTML`；惡意檔名或模型輸出可在分享出去的 gallery 執行腳本。
   - 改善：以 `createElement`、`textContent`、屬性 API 建 DOM，不組合 HTML 字串；輸出的 `index.html` 加嚴格 CSP，`data.js` 改成無執行性的 JSON 或內嵌轉義資料。
   - 驗證：加入 `<img onerror=...>`、`</script>`、引號與 Unicode 邊界 fixture，確認只能顯示純文字，且 CSP 阻擋 inline script。
+  - 完成（2026-07-26）：移除 `innerHTML` 與可執行的 `data.js`；使用者檔名及模型 reasoning 先轉成 UTF-8 JSON，再以 Base64 放入 inert `data-payload`。固定外部 `gallery.js` 只用 `createElement`、`textContent` 與安全屬性建立卡片；圖片輸出名稱改為程式產生的 `images/image-N.{jpg,png,webp}`，不再使用原始檔名組路徑。`index.html` 新增禁止 inline script、外連、object、form 與 base URL 的 CSP。
+  - 驗證紀錄：新增 `test:gallery`，涵蓋 `<img onerror>`、`</script><script>`、引號、emoji／Unicode、惡意 ID、SVG data URL 與 `javascript:`；確認資料可完整還原為純文字、HTML 不含原始 payload、runtime 不含 `innerHTML`，且輸出腳本可解析。實際瀏覽器載入惡意 fixture 後，檔名／reasoning 只以純文字顯示，事件屬性數量為 0、inline executable script 為 0、`pwned` 未被設定，圖片來源固定為 `images/image-1.jpg`，且 console 無 error/warning。`npm test`、`npm run build` 與 `guard:public-repo` 通過。
 
 - [ ] **REV-P0-04：重畫 official runtime 的計費信任邊界**
   - 證據：`docs/dual-repo/shared/API-CONTRACT.md` 讓 client 呼叫 `/usage/authorize` 後再回報 `/usage/settle`，卻沒有後端代跑模型的 execute/job API；client 可少報用量、不 settle，且官方 provider key 無安全放置位置。

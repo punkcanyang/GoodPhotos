@@ -1,7 +1,7 @@
 {
   "name": "goodphoto",
   "private": true,
-  "version": "0.1.5",
+  "version": "0.1.6",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,7 +14,8 @@
     "test:providers": "node --import tsx tests/llmClient.providers.test.ts",
     "test:rate-limit": "node --import tsx tests/llmClient.rate-limit.test.ts",
     "test:updater": "node --import tsx tests/updater.test.ts",
-    "test": "npm run test:providers && npm run test:rate-limit && npm run test:updater"
+    "test:gallery": "node --import tsx tests/galleryExporter.security.test.ts",
+    "test": "npm run test:providers && npm run test:rate-limit && npm run test:updater && npm run test:gallery"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

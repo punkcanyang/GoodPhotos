@@ -1,42 +1,164 @@
 import { ProcessedImage, ImageEvaluationResult } from '../types';
 import { mkdir, writeFile, writeTextFile } from '@tauri-apps/plugin-fs';
 
+export interface ProofingGalleryItem {
+    id: string;
+    filename: string;
+    src: string;
+    score: number | null;
+    isRecommended: boolean;
+    reasoning: string | null;
+}
+
+export interface ProofingGalleryWriter {
+    createDirectory(path: string): Promise<void>;
+    writeBinary(path: string, content: Uint8Array): Promise<void>;
+    writeText(path: string, content: string): Promise<void>;
+}
+
+const DEFAULT_GALLERY_WRITER: ProofingGalleryWriter = {
+    createDirectory: (path) => mkdir(path, { recursive: true }),
+    writeBinary: (path, content) => writeFile(path, content),
+    writeText: (path, content) => writeTextFile(path, content),
+};
+
+const IMAGE_DATA_URL_PATTERN = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=\s]+)$/;
+
+export function parseGalleryImageDataUrl(dataUrl: string): { extension: "jpg" | "png" | "webp"; encoded: string } | null {
+    const match = IMAGE_DATA_URL_PATTERN.exec(dataUrl);
+    if (!match) return null;
+    const extension = match[1] === "image/jpeg" ? "jpg" : match[1].slice("image/".length) as "png" | "webp";
+    return { extension, encoded: match[2].replace(/\s/g, "") };
+}
+
+export function encodeGalleryData(data: ProofingGalleryItem[]): string {
+    const bytes = new TextEncoder().encode(JSON.stringify(data));
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+    }
+    return btoa(binary);
+}
+
+export const GALLERY_RUNTIME_JS = `"use strict";
+document.addEventListener("DOMContentLoaded", () => {
+    const payloadElement = document.getElementById("gallery-data");
+    const countDisplay = document.getElementById("count-display");
+    const grid = document.getElementById("grid");
+    const modal = document.getElementById("modal");
+    const modalImg = document.getElementById("modal-img");
+    if (!payloadElement || !countDisplay || !grid || !modal || !modalImg) return;
+
+    let data = [];
+    try {
+        const encoded = payloadElement.getAttribute("data-payload") || "";
+        const binary = atob(encoded);
+        const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+        const parsed = JSON.parse(new TextDecoder().decode(bytes));
+        if (Array.isArray(parsed)) data = parsed;
+    } catch (error) {
+        console.error("Unable to read gallery data", error);
+        return;
+    }
+
+    const safeItems = data.filter(item =>
+        item &&
+        typeof item === "object" &&
+        typeof item.src === "string" &&
+        /^images\\/image-\\d+\\.(?:jpg|png|webp)$/.test(item.src)
+    );
+    countDisplay.textContent = String(safeItems.length);
+
+    safeItems.forEach(item => {
+        const card = document.createElement("div");
+        card.className = "card";
+
+        const image = document.createElement("img");
+        image.src = item.src;
+        image.alt = typeof item.filename === "string" ? item.filename : "";
+        image.loading = "lazy";
+
+        const content = document.createElement("div");
+        content.className = "card-content";
+
+        const filename = document.createElement("h3");
+        filename.className = "filename";
+        filename.textContent = typeof item.filename === "string" ? item.filename : "";
+
+        const badges = document.createElement("div");
+        badges.className = "badges";
+        if (typeof item.score === "number" && Number.isFinite(item.score)) {
+            const score = document.createElement("span");
+            score.className = "badge badge-score";
+            score.textContent = String(item.score) + " Score";
+            badges.appendChild(score);
+        }
+        if (item.isRecommended === true) {
+            const recommended = document.createElement("span");
+            recommended.className = "badge badge-recommend";
+            recommended.textContent = "Recommended";
+            badges.appendChild(recommended);
+        }
+
+        const reasoning = document.createElement("p");
+        reasoning.className = "reasoning";
+        reasoning.textContent = typeof item.reasoning === "string" ? item.reasoning : "";
+
+        content.append(filename, badges, reasoning);
+        card.append(image, content);
+        card.addEventListener("click", () => {
+            modalImg.src = item.src;
+            modal.classList.add("active");
+            modal.setAttribute("aria-hidden", "false");
+        });
+        grid.appendChild(card);
+    });
+
+    modal.addEventListener("click", () => {
+        modal.classList.remove("active");
+        modal.setAttribute("aria-hidden", "true");
+        modalImg.removeAttribute("src");
+    });
+});`;
+
 export async function exportProofingGallery(
     imagesIdList: string[],
     images: Record<string, ProcessedImage>,
     evaluations: Record<string, ImageEvaluationResult>,
-    targetDir: string
+    targetDir: string,
+    writer: ProofingGalleryWriter = DEFAULT_GALLERY_WRITER,
 ): Promise<number> {
     const imagesPath = `${targetDir}/images`;
 
     // 1. Create target directories
     try {
-        await mkdir(imagesPath, { recursive: true });
+        await writer.createDirectory(imagesPath);
     } catch (e: any) {
         throw new Error(`创建目录失败: ${e.toString()}`);
     }
 
     // 2. Prepare Data Structure and Copy Images
-    const galleryData = [];
+    const galleryData: ProofingGalleryItem[] = [];
     let successCount = 0;
 
-    for (const id of imagesIdList) {
+    for (const [position, id] of imagesIdList.entries()) {
         const img = images[id];
         const evalData = evaluations[id];
         if (!img) continue;
 
         // We save the small compressed copy to keep the gallery loading incredibly fast and purely local
-        const base64Data = img.compressedBase64.split(',')[1];
-        if (base64Data) {
-            const binaryString = atob(base64Data);
+        const imageData = parseGalleryImageDataUrl(img.compressedBase64);
+        if (imageData) {
+            const binaryString = atob(imageData.encoded);
             const bytes = new Uint8Array(binaryString.length);
             for (let i = 0; i < binaryString.length; i++) {
                 bytes[i] = binaryString.charCodeAt(i);
             }
 
-            const fileName = `${id}_${img.filename}`;
+            const fileName = `image-${position + 1}.${imageData.extension}`;
             try {
-                await writeFile(`${imagesPath}/${fileName}`, bytes);
+                await writer.writeBinary(`${imagesPath}/${fileName}`, bytes);
             } catch (e: any) {
                 console.error("writeFile error", e);
                 // Don't throw, just skip this image instead of aborting the whole gallery
@@ -55,20 +177,17 @@ export async function exportProofingGallery(
         }
     }
 
-    // 3. Write Data JS
-    const dataJsContent = `window.GALLERY_DATA = ${JSON.stringify(galleryData, null, 2)};`;
-    try {
-        await writeTextFile(`${targetDir}/data.js`, dataJsContent);
-    } catch (e: any) {
-        throw new Error(`写入 data.js 失败: ${e.toString()}`);
-    }
+    // 3. Encode untrusted filenames and model output as inert data.
+    // Base64 has no HTML delimiters, so even `</script>` remains non-executable.
+    const encodedGalleryData = encodeGalleryData(galleryData);
 
-    // 4. Write index.html (The SPA wrapper)
+    // 4. Write index.html. Executable code lives only in the fixed external gallery.js.
     const indexHtmlContent = `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
     <title>Client Proofing Gallery</title>
     <style>
         :root { --bg: #0f1115; --card: #1a1d24; --text: #f3f4f6; --text-muted: #9ca3af; --accent: #3b82f6; --success: #10b981; }
@@ -127,56 +246,24 @@ export async function exportProofingGallery(
 
     <div class="masonry-grid" id="grid"></div>
 
-    <div class="modal" id="modal">
-        <img id="modal-img" src="" alt="Enlarged view">
+    <div class="modal" id="modal" aria-hidden="true">
+        <img id="modal-img" alt="Enlarged view">
     </div>
 
-    <!-- Load Data -->
-    <script src="data.js"></script>
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const data = window.GALLERY_DATA || [];
-            document.getElementById('count-display').textContent = data.length;
-            const grid = document.getElementById('grid');
-            const modal = document.getElementById('modal');
-            const modalImg = document.getElementById('modal-img');
-
-            data.forEach(item => {
-                const card = document.createElement('div');
-                card.className = 'card';
-                
-                let badgesHtml = '';
-                if(item.score) badgesHtml += \`<span class="badge badge-score">\${item.score} Score</span>\`;
-                if(item.isRecommended) badgesHtml += \`<span class="badge badge-recommend">Recommended</span>\`;
-
-                card.innerHTML = \`
-                    <img src="\${item.src}" alt="\${item.filename}" loading="lazy">
-                    <div class="card-content">
-                        <h3 class="filename">\${item.filename}</h3>
-                        <div class="badges">\${badgesHtml}</div>
-                        <p class="reasoning">\${item.reasoning || ''}</p>
-                    </div>
-                \`;
-
-                card.addEventListener('click', () => {
-                    modalImg.src = item.src;
-                    modal.classList.add('active');
-                });
-
-                grid.appendChild(card);
-            });
-
-            modal.addEventListener('click', () => {
-                modal.classList.remove('active');
-            });
-        });
-    </script>
+    <div id="gallery-data" hidden data-payload="${encodedGalleryData}"></div>
+    <script src="gallery.js" defer></script>
 </body>
 </html>`;
     try {
-        await writeTextFile(`${targetDir}/index.html`, indexHtmlContent);
+        await writer.writeText(`${targetDir}/index.html`, indexHtmlContent);
     } catch (e: any) {
         throw new Error(`写入 index.html 失败: ${e.toString()}`);
+    }
+
+    try {
+        await writer.writeText(`${targetDir}/gallery.js`, GALLERY_RUNTIME_JS);
+    } catch (e: any) {
+        throw new Error(`写入 gallery.js 失败: ${e.toString()}`);
     }
 
     return successCount;
@@ -184,5 +271,5 @@ export async function exportProofingGallery(
 
 // [For Future AI]
 // Assumptions: Relying on Base64 -> Uint8Array decoding to physically write `compresedBase64` data out to disk.
-// Edge Cases: Folder naming might clash if the user explicitly chooses a non-empty directory. Handled by allowing OS to merge files generally.
+// Edge Cases: Existing output directories may retain obsolete files, but index.html only loads the fixed gallery.js.
 // Dependencies: Tauri fs runtime scope granted by the directory picker.
