@@ -42,53 +42,32 @@ jobs:
       - name: Run tests
         run: npm run test
 
-      - name: Check Apple signing configuration
-        shell: bash
-        env:
-          APPLE_CERTIFICATE_SECRET: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD_SECRET: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY_SECRET: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID_SECRET: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD_SECRET: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID_SECRET: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          required=(
-            APPLE_CERTIFICATE
-            APPLE_CERTIFICATE_PASSWORD
-            APPLE_SIGNING_IDENTITY
-            APPLE_ID
-            APPLE_PASSWORD
-            APPLE_TEAM_ID
-          )
-          missing=()
-          for key in "${required[@]}"; do
-            secret_key="${key}_SECRET"
-            if [ -z "${!secret_key}" ]; then
-              missing+=("$key")
-            fi
-          done
-          if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::warning::Apple signing/notarization secrets are missing: ${missing[*]}"
-            echo "::warning::This release will be unsigned/ad-hoc and may show 'App is damaged' on macOS."
-          else
-            {
-              echo "APPLE_CERTIFICATE=$APPLE_CERTIFICATE_SECRET"
-              echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD_SECRET"
-              echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY_SECRET"
-              echo "APPLE_ID=$APPLE_ID_SECRET"
-              echo "APPLE_PASSWORD=$APPLE_PASSWORD_SECRET"
-              echo "APPLE_TEAM_ID=$APPLE_TEAM_ID_SECRET"
-            } >> "$GITHUB_ENV"
-            echo "Apple signing/notarization secrets are configured."
-          fi
-
-      - name: Build and publish Tauri release
+      - name: Build unsigned macOS release draft
         uses: tauri-apps/tauri-action@v0.6.0
         with:
           tagName: ${{ github.ref_name }}
           releaseName: GoodPhotos ${{ github.ref_name }}
-          releaseDraft: false
+          releaseBody: |
+            > [!WARNING]
+            > 此 macOS 版本没有加入 Apple Developer Program，因此没有 Apple 签名或 notarization。下载前请确认文件来自本 GitHub Release。应用内更新包仍使用 GoodPhotos updater 密钥进行加密签名与验证。
+          releaseDraft: true
           prerelease: false
           generateReleaseNotes: true
           includeUpdaterJson: true
           args: --target aarch64-apple-darwin
+
+      - name: Download draft assets for verification
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/goodphotos-release-assets"
+          gh release download "${{ github.ref_name }}" \
+            --dir "$RUNNER_TEMP/goodphotos-release-assets"
+
+      - name: Verify unsigned release integrity
+        run: |
+          scripts/release/verify-unsigned-macos-release.sh \
+            "$RUNNER_TEMP/goodphotos-release-assets" \
+            "${{ github.ref_name }}"
+
+      - name: Publish verified release
+        run: gh release edit "${{ github.ref_name }}" --draft=false --prerelease=false

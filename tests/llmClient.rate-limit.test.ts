@@ -5,8 +5,12 @@ import type { AestheticCriteria, LlmConfig, ProcessedImage } from "../src/types"
 
 const criteria: AestheticCriteria = {
   theme: "test-theme",
+  subject: [],
+  background: [],
+  lighting: [],
+  colorScheme: [],
+  artisticStyle: [],
   compositionRules: ["rule-1"],
-  lightingAndColor: ["light-1"],
   negativeConstraints: ["bad-1"],
 };
 

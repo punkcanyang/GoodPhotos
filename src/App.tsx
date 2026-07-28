@@ -26,6 +26,7 @@ import {
   type UpdateDownloadEvent,
   type UpdaterState,
 } from "./utils/updater";
+import { RetryableEvaluationBatchError } from "./utils/llmSchemas";
 
 export const DEFAULT_LLM_CONFIG: LlmConfig = createDefaultLlmConfig();
 
@@ -776,7 +777,11 @@ function App() {
       setAnalysisStep("");
     } catch (error: any) {
       console.error(error);
-      setErrorMsg(error.message || "分析过程出现错误");
+      if (error instanceof RetryableEvaluationBatchError) {
+        setErrorMsg(`模型回傳的批次格式不完整，已嘗試修復一次。請重試這批照片（${error.batchIds.length} 張）。`);
+      } else {
+        setErrorMsg(error.message || "分析过程出现错误");
+      }
     } finally {
       setIsAnalyzing(false);
     }

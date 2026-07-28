@@ -125,10 +125,12 @@
   - 改善：依 rendered image rect 映射筆畫，拒絕空遮罩；明確定義服務輸出為新的衍生檔（Stability Erase 固定輸出 4MP），保留原檔、EXIF/ICC/方向資訊與可追蹤 provenance，不宣稱「原生畫質」。
   - 驗證：橫幅、直幅、方形、含 letterbox、Retina scale 與空遮罩皆有像素級測試；確認原檔永不被改寫。
 
-- [ ] **REV-P1-04：對模型回應做 schema 與批次完整性驗證**
+- [x] **REV-P1-04：對模型回應做 schema 與批次完整性驗證**
   - 證據：`src/utils/llmClient.ts:171-175, 350-351, 402-405, 425-428` 只做 `JSON.parse`，未檢查 score 範圍、欄位型別、重複/未知 imageId、漏回圖片或額外結果。
   - 改善：導入 runtime schema；每批結果須與輸入 ID 一對一；score clamp 應改成拒絕並重試一次結構修復，仍失敗則把該批標為可重試錯誤。
   - 驗證：針對 malformed JSON、markdown fence、0/100 邊界、NaN、重複 ID、未知 ID、少一張與多一張建立 contract tests。
+  - 完成（2026-07-28）：新增 criteria 與 evaluation runtime schema；evaluation 逐欄驗證型別、整數 score 0–100、OCR 字串資料與輸入 ID 一對一，並依輸入順序回傳。首次契約失敗會向同一 provider 要求一次完整結構修復，第二次失敗則拋出含 batch IDs 的 `RetryableEvaluationBatchError`，UI 明確提示可重試。
+  - 驗證紀錄：新增 `test:schema`，涵蓋 malformed JSON、JSON markdown fence、0/100、NaN、重複／未知／缺少／額外 ID、越界／小數／錯誤型別、修復成功及修復後仍失敗；`npm test` 與 `npm run build` 通過。
 
 - [ ] **REV-P1-05：建立可維護的 provider 相容性層與健康檢查**
   - 證據：`src/llmProviders.ts` 把 11 家服務都視為兩種 transport；官方資料顯示目前 DeepSeek API 模型已不是程式內的 `deepseek-vl2*`，Gemini 的 production stable ID 也不是目前預設的 `gemini-2.5-pro-preview-03-25`。現有 tests 只 mock 四家 URL，沒有真的驗證 vision、JSON schema、參數與模型存在性。
@@ -140,20 +142,23 @@
   - 改善：先定技術棧與部署面，再建立 auth、ledger、idempotency、provider job、webhook、migration 與 observability 骨架；第一個 commit 應含 `AGENTS.md`、威脅模型、資料保留規範與最小 CI。
   - 驗證：乾淨 clone 可一鍵啟動 isolated test DB，並通過 ledger concurrency、idempotency、webhook signature、retry 與 migration rollback 測試。
 
-- [ ] **REV-P1-07：在每次 PR/push 執行完整品質閘門**
+- [x] **REV-P1-07：在每次 PR/push 執行完整品質閘門**
   - 證據：`.github/workflows/release.yml` 只在 `v*` tag 執行，且只跑 `npm test`；不會先跑 build、`cargo check`、公開 repo guard、依賴稽核或雙 repo contract drift 檢查。
   - 改善：新增 CI workflow 跑 `npm ci`、type/build、tests、guard、獨立 target 的 `cargo check/clippy/fmt`；shared contract 產生 hash 或 schema，兩 repo 不一致即失敗。
   - 驗證：刻意製造 TypeScript error、Rust error、secret fixture 與契約 drift，CI 必須在 tag 前阻擋。
+  - 完成（2026-07-28）：新增 `ci.yml`，在 PR、`main` push 與手動執行時跑 Node 22 安裝、production dependency audit、公開 repo／契約 guard、完整 tests 與 build；macOS job 使用獨立 Cargo target 跑 `fmt --check`、all-target `check` 與 `clippy -D warnings`。shared docs 新增 SHA-256 manifest，guard 與跨 repo sync 都會驗證／同步。
+  - 驗證紀錄：本機 `npm audit --omit=dev --audit-level=high` 為 0 漏洞，guard、build、Cargo fmt/check/clippy 與 workflow YAML 解析皆通過；修改 shared docs 而未更新 manifest 時 `shasum --check` 會讓 guard 失敗。
 
 - [ ] **REV-P1-08：修補開發工具鏈弱點並鎖定 Node 版本**
   - 證據：完整 `npm audit` 回報 15 個 dev/tooling 弱點（3 high、6 moderate、6 low），包含 Vite dev-server 路徑讀取、Rollup 任意寫入與 picomatch ReDoS；README 宣稱 Node 18+，但已安裝 Vite 7.3.1 要求 Node `^20.19.0 || >=22.12.0`。
   - 改善：升級到包含修補的 Vite/Rollup/PostCSS/picomatch 相依版本，必要時更新直接依賴 constraint；新增 `engines.node`、`.nvmrc`/Volta 與 CI Node 22；開發 server 不得對不受信任網路暴露。
   - 驗證：`npm audit` 對可利用的 dev-server/build 路徑為零 high；Node 版本不符時安裝或 preflight 明確失敗。
 
-- [ ] **REV-P1-09：穩定版 release 必須強制簽章與 notarization**
-  - 證據：release workflow 在 Apple secrets 缺少時只警告，仍會發佈正式 non-prerelease；`docs/release/macos-updater-checklist.md:43-49` 卻寫成 workflow 應通過 signing secrets 驗證。v0.1.5 資產存在，但目前流程無法從 CI gate 證明 DMG 已簽章/notarize。
-  - 改善：stable tag 缺任一 Apple secret 就 fail；若要保留 unsigned build，只能輸出明確標示的 draft/prerelease artifact。建置後執行 `codesign --verify --deep --strict`、`spctl --assess` 與 stapler 驗證。
-  - 驗證：缺 secret 的 stable release 必敗；有 secret 時下載實際 DMG，在乾淨 macOS 帳號通過 Gatekeeper 與 updater 升級。
+- [x] **REV-P1-09：unsigned stable release 必須揭露狀態並驗證 updater 完整性**
+  - 決策背景：專案不打算支付 Apple Developer Program 年費，因此不把 Apple 簽章或 notarization 當成 stable release 前提；不能因此省略安全揭露或更新檔驗證。
+  - 改善：Release 頁明確標示 macOS build 未經 Apple 簽章／notarization；Tauri action 先建立 draft，下載實際資產後驗證 updater 簽章、metadata、版本、URL、DMG 完整性及 SHA-256，全部通過才發布 stable。
+  - 完成（2026-07-28）：移除六項 Apple secrets 與 Gatekeeper／stapler 強制閘門；新增 Node Ed25519／Minisign verifier，使用內建 `updater.pubkey` 驗證 `.app.tar.gz`，另核對 detached `.sig`、`latest.json`、tag、archive bundle 版本與 DMG CRC。Release body 與 README 固定揭露 unsigned 政策。
+  - 驗證紀錄：單元測試證明合法 updater 簽章通過、竄改 archive 必敗；並以 v0.1.6 真實 Release 資產驗證簽章、metadata、0.1.6 bundle 版本、DMG CRC 與四項 SHA-256 全部通過。v0.1.5 → v0.1.6 實機 updater 重新啟動也已通過，現有 v0.1.6 公開 Release 頁亦已補上 unsigned 警示。
 
 - [ ] **REV-P1-10：為複製、gallery 與擦除輸出建立衝突政策與原子寫入**
   - 證據：`src-tauri/src/lib.rs:66-88` 所有輸出直接寫目標；`copy_file` 會覆寫同名檔，gallery 同分鐘資料夾也會合併，UI 沒有逐檔結果、跳過或復原資訊。
@@ -214,9 +219,9 @@
   - 建議：正式清單只保留有 live vision contract test 的少數 provider，其餘列為 experimental/custom endpoint；不要用同一個 OpenAI-compatible payload 宣稱完整支援。
   - 選項：A. 分 verified/experimental（建議）；B. 縮成 3–4 家；C. 維持 11 家並承擔完整測試成本。
 
-- [ ] **DEC-2026-07-19-06：stable release 的簽章政策**
-  - 建議：stable release 缺 Apple 簽章/notarization 就直接失敗；unsigned 只能是 draft/prerelease，名稱清楚警示。
-  - 選項：A. stable 強制簽章（建議）；B. 允許 unsigned stable（不建議）。
+- [x] **DEC-2026-07-19-06：stable release 的簽章政策**
+  - 選項：A. 付費加入 Apple Developer Program並強制簽章；B. 允許 unsigned stable，但固定揭露狀態並強制驗證 updater 簽章與產物完整性。
+  - 決策（2026-07-28）：採 B；不支付 Apple Developer Program 年費。Stable release 可以 unsigned，但不得省略 Release 警示、updater 密碼學簽章、metadata／版本／URL 核對與 DMG 完整性驗證。
 
 - [ ] **DEC-2026-07-19-07：AI 擦除的產品承諾**
   - 建議：定位為「建立 4MP 衍生檔並保留原檔」，UI 顯示預估尺寸、格式與成本；若要原解析度，另建 tiling/upscale pipeline，不以現況宣稱原生畫質。

@@ -90,8 +90,12 @@ async function testCompatibleProvidersUseDefaultUrls(): Promise<void> {
                 message: {
                   content: JSON.stringify({
                     theme: "Clean",
+                    subject: ["subject-1"],
+                    background: ["background-1"],
+                    lighting: ["light-1"],
+                    colorScheme: ["color-1"],
+                    artisticStyle: ["style-1"],
                     compositionRules: ["rule-1"],
-                    lightingAndColor: ["light-1"],
                     negativeConstraints: ["bad-1"],
                   }),
                 },

@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 ALLOWLIST_FILE="$ROOT_DIR/docs/dual-repo/secret-scan-allowlist.regex"
+SHARED_CONTRACT_DIR="$ROOT_DIR/docs/dual-repo/shared"
 
 FAILED=0
 
@@ -51,6 +52,19 @@ if [[ -n "$MATCHES" ]]; then
   echo "[guard][error] possible secret detected:"
   echo "$MATCHES"
   echo "[guard][hint] if any line is expected, add an allowlist regex to: $ALLOWLIST_FILE"
+  FAILED=1
+fi
+
+echo "[guard] checking shared contract manifest..."
+if [[ ! -f "$SHARED_CONTRACT_DIR/contract.sha256" ]]; then
+  echo "[guard][error] missing shared contract manifest"
+  FAILED=1
+elif ! (
+  cd "$SHARED_CONTRACT_DIR"
+  shasum -a 256 --check contract.sha256
+); then
+  echo "[guard][error] shared contract drift detected"
+  echo "[guard][hint] review the contract changes, then update docs/dual-repo/shared/contract.sha256"
   FAILED=1
 fi
 

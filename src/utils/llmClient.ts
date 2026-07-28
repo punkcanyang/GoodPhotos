@@ -13,6 +13,12 @@ import {
     usesOpenAiRateLimitStrategy,
     usesSmallBatchWindow
 } from "../llmProviders";
+import {
+    EvaluationContractError,
+    parseAestheticCriteriaContent,
+    parseEvaluationBatchContent,
+    RetryableEvaluationBatchError,
+} from "./llmSchemas";
 
 const DEFAULT_CHUNK_SIZE = 15;
 const OPENAI_CHUNK_SIZE = 5;
@@ -202,13 +208,6 @@ const getOpenAiPostBatchDelayMs = (remainingTokens: number | null, resetTokensMs
     return INTER_BATCH_DELAY_MS;
 };
 
-const parseEvaluationContent = (rawContent: string): ImageEvaluationResult[] => {
-    let rawJson = rawContent.trim();
-    if (rawJson.startsWith("\`\`\`json")) rawJson = rawJson.replace(/^\`\`\`json/g, "").replace(/\`\`\`$/g, "");
-    else if (rawJson.startsWith("\`\`\`")) rawJson = rawJson.replace(/^\`\`\`/g, "").replace(/\`\`\`$/g, "");
-    return JSON.parse(rawJson);
-};
-
 interface BatchEvaluationResponse {
     results: ImageEvaluationResult[];
     remainingTokens: number | null;
@@ -247,7 +246,7 @@ CRITICAL: You must translate the JSON values and output all text content inside 
 
         if (!response.ok) throw new Error(`Gemini Error: ${await response.text()}`);
         const data = await response.json();
-        return JSON.parse(data.candidates[0].content.parts[0].text);
+        return parseAestheticCriteriaContent(data.candidates[0].content.parts[0].text);
     } else {
         const payload: any = {
             model: ctx.model,
@@ -265,8 +264,7 @@ CRITICAL: You must translate the JSON values and output all text content inside 
 
         if (!response.ok) throw new Error(`API Error: ${await response.text()}`);
         const data = await response.json();
-        const rawJson = data.choices[0].message.content;
-        return JSON.parse(rawJson.replace(/^\`\`\`json/g, "").replace(/\`\`\`$/g, "").trim());
+        return parseAestheticCriteriaContent(data.choices[0].message.content);
     }
 };
 
@@ -285,6 +283,7 @@ export const evaluateImages = async (
     const chunks = chunkItems(images, chunkSize);
 
     const processBatch = async (batch: ProcessedImage[]): Promise<BatchEvaluationResponse> => {
+        const expectedIds = batch.map(image => image.id);
         const textPrompt = `你是一位顶级视觉总监，同时也是艺术摄影编辑。
 你的审美底线参考：
 ${profile.evaluationStandard}
@@ -331,18 +330,30 @@ ${profile.evaluationStandard}
 
 CRITICAL: You must output the content of the \`reasoning\` field in the following language: ${langInstruction}. The rest of the keys remain intact.`;
 
-        if (isGeminiProvider(ctx.provider)) {
-            const parts: any[] = [{ text: textPrompt }];
-            for (const img of batch) {
-                const partsMatch = img.compressedBase64.match(/^data:(image\/[a-zA-Z]*);base64,([^\"]*)$/);
-                if (partsMatch) {
-                    parts.push({
-                        inlineData: { mimeType: partsMatch[1], data: partsMatch[2] }
-                    });
-                }
-            }
+        const requestBatch = async (repairIssue?: string): Promise<{
+            rawContent: string;
+            remainingTokens: number | null;
+            resetTokensMs: number | null;
+        }> => {
+            const requestPrompt = repairIssue
+                ? `${textPrompt}
 
-            const response = await providerFetch(ctx, {
+上一個回應未通過資料契約驗證：${repairIssue}
+這是唯一一次結構修復機會。請重新輸出完整 JSON 陣列，確保每個指定 imageId 恰好出現一次、沒有未知 ID，且所有欄位型別與 score 範圍正確。`
+                : textPrompt;
+
+            if (isGeminiProvider(ctx.provider)) {
+                const parts: any[] = [{ text: requestPrompt }];
+                for (const img of batch) {
+                    const partsMatch = img.compressedBase64.match(/^data:(image\/[a-zA-Z]*);base64,([^\"]*)$/);
+                    if (partsMatch) {
+                        parts.push({
+                            inlineData: { mimeType: partsMatch[1], data: partsMatch[2] }
+                        });
+                    }
+                }
+
+                const response = await providerFetch(ctx, {
                     systemInstruction: { parts: [{ text: "You are an API that strictly returns valid JSON arrays." }] },
                     contents: [{ role: "user", parts }],
                     generationConfig: {
@@ -362,83 +373,94 @@ CRITICAL: You must output the content of the \`reasoning\` field in the followin
                             }
                         }
                     }
-            });
+                });
 
-            if (!response.ok) throw new Error(`Gemini evaluation failed: ${await response.text()}`);
-            const data = await response.json();
-            return {
-                results: JSON.parse(data.candidates[0].content.parts[0].text),
-                remainingTokens: null,
-                resetTokensMs: null
-            };
-
-        } else {
-            const userContent: any[] = [{ type: "text", text: textPrompt }];
-            for (const img of batch) {
-                userContent.push({ type: "image_url", image_url: { url: img.compressedBase64 } });
-            }
-
-            const payload: any = {
-                model: ctx.model,
-                messages: [
-                    { role: "system", content: "You are an API that strictly returns valid JSON arrays." },
-                    { role: "user", content: userContent }
-                ]
-            };
-
-            if (usesOpenAiRateLimitStrategy(ctx.provider)) {
-                let attemptIndex = 0;
-
-                while (true) {
-                    const response = await providerFetch(ctx, payload);
-
-                    if (response.status === 429) {
-                        const responseText = await response.text();
-
-                        if (attemptIndex >= MAX_OPENAI_429_RETRIES) {
-                            throw new Error(`API evaluation failed: ${responseText}`);
-                        }
-
-                        const retryDelayMs = getOpenAiRetryDelayMs(response, responseText, attemptIndex);
-                        attemptIndex += 1;
-                        await sleep(retryDelayMs);
-                        continue;
-                    }
-
-                    if (!response.ok) throw new Error(`API evaluation failed: ${await response.text()}`);
-
-                    const remainingTokens = parseRemainingTokens(response.headers.get("x-ratelimit-remaining-tokens"));
-                    const resetTokensMs = parseDurationMs(response.headers.get("x-ratelimit-reset-tokens"));
-                    const data = await response.json();
-
-                    try {
-                        return {
-                            results: parseEvaluationContent(data.choices[0].message.content),
-                            remainingTokens,
-                            resetTokensMs
-                        };
-                    } catch (e) {
-                        console.error("Raw content:", data.choices[0].message.content);
-                        throw new Error("Failed to parse evaluation response.");
-                    }
-                }
-            }
-
-            const response = await providerFetch(ctx, payload);
-
-            if (!response.ok) throw new Error(`API evaluation failed: ${await response.text()}`);
-            const data = await response.json();
-            try {
+                if (!response.ok) throw new Error(`Gemini evaluation failed: ${await response.text()}`);
+                const data = await response.json();
                 return {
-                    results: parseEvaluationContent(data.choices[0].message.content),
+                    rawContent: data.candidates[0].content.parts[0].text,
                     remainingTokens: null,
                     resetTokensMs: null
                 };
-            } catch (e) {
-                console.error("Raw content:", data.choices[0].message.content);
-                throw new Error("Failed to parse evaluation response.");
+
+            } else {
+                const userContent: any[] = [{ type: "text", text: requestPrompt }];
+                for (const img of batch) {
+                    userContent.push({ type: "image_url", image_url: { url: img.compressedBase64 } });
+                }
+
+                const payload: any = {
+                    model: ctx.model,
+                    messages: [
+                        { role: "system", content: "You are an API that strictly returns valid JSON arrays." },
+                        { role: "user", content: userContent }
+                    ]
+                };
+
+                if (usesOpenAiRateLimitStrategy(ctx.provider)) {
+                    let attemptIndex = 0;
+
+                    while (true) {
+                        const response = await providerFetch(ctx, payload);
+
+                        if (response.status === 429) {
+                            const responseText = await response.text();
+
+                            if (attemptIndex >= MAX_OPENAI_429_RETRIES) {
+                                throw new Error(`API evaluation failed: ${responseText}`);
+                            }
+
+                            const retryDelayMs = getOpenAiRetryDelayMs(response, responseText, attemptIndex);
+                            attemptIndex += 1;
+                            await sleep(retryDelayMs);
+                            continue;
+                        }
+
+                        if (!response.ok) throw new Error(`API evaluation failed: ${await response.text()}`);
+
+                        const remainingTokens = parseRemainingTokens(response.headers.get("x-ratelimit-remaining-tokens"));
+                        const resetTokensMs = parseDurationMs(response.headers.get("x-ratelimit-reset-tokens"));
+                        const data = await response.json();
+
+                        return {
+                            rawContent: data.choices[0].message.content,
+                            remainingTokens,
+                            resetTokensMs
+                        };
+                    }
+                }
+
+                const response = await providerFetch(ctx, payload);
+
+                if (!response.ok) throw new Error(`API evaluation failed: ${await response.text()}`);
+                const data = await response.json();
+                return {
+                    rawContent: data.choices[0].message.content,
+                    remainingTokens: null,
+                    resetTokensMs: null
+                };
+            }
+        };
+
+        let repairIssue: string | undefined;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            const response = await requestBatch(repairIssue);
+            try {
+                return {
+                    results: parseEvaluationBatchContent(response.rawContent, expectedIds),
+                    remainingTokens: response.remainingTokens,
+                    resetTokensMs: response.resetTokensMs,
+                };
+            } catch (error) {
+                if (!(error instanceof EvaluationContractError) || attempt === 1) {
+                    const detail = error instanceof Error ? error.message : "Unknown contract error.";
+                    throw new RetryableEvaluationBatchError(expectedIds, detail);
+                }
+                repairIssue = error.message;
             }
         }
+
+        throw new RetryableEvaluationBatchError(expectedIds, "Unknown contract error.");
     };
 
     try {

@@ -48,5 +48,6 @@ mkdir -p "$TARGET_DIR"
 
 cp "$SOURCE_DIR/ARCHITECTURE.md" "$TARGET_DIR/ARCHITECTURE.md"
 cp "$SOURCE_DIR/API-CONTRACT.md" "$TARGET_DIR/API-CONTRACT.md"
+cp "$SOURCE_DIR/contract.sha256" "$TARGET_DIR/contract.sha256"
 
 echo "Synced shared docs to: $TARGET_DIR"

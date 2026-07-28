@@ -65,6 +65,15 @@ GoodPhoto 可以自由选用接入业内目前最聪明的多模态（视觉）A
 
 ---
 
+## ⚠️ macOS 发布说明
+
+GoodPhotos 目前没有参加付费的 Apple Developer Program，因此 GitHub Release
+提供的 macOS 应用没有 Apple 签名，也没有经过 notarization。每个 Release
+都会明确标示这一点。应用内自动更新使用独立的 GoodPhotos updater 密钥签名，
+发布流程会验证更新包签名、版本、下载地址、元数据与 DMG 完整性。
+
+---
+
 ## 💻 开发者支持：极客与贡献者指南 (Developer Notes)
 
 如果你希望参与源码开发或者应用尚未发布最新系统版本安装包时自行构建：

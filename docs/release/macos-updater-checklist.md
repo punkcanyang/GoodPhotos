@@ -13,14 +13,13 @@
 
    - `TAURI_SIGNING_PRIVATE_KEY`: contents of `~/.tauri/goodphotos-updater.key`
    - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: the password entered during key generation
-   - `APPLE_CERTIFICATE`: base64 of exported Developer ID Application `.p12`
-   - `APPLE_CERTIFICATE_PASSWORD`: password used when exporting the `.p12`
-   - `APPLE_SIGNING_IDENTITY`: e.g. `Developer ID Application: Your Name (TEAMID)`
-   - `APPLE_ID`: Apple Account email
-   - `APPLE_PASSWORD`: app-specific password (from appleid.apple.com)
-   - `APPLE_TEAM_ID`: Apple Developer Team ID
 
 3. Keep the updater private key in a password manager or other durable secure storage.
+
+GoodPhotos currently does not participate in the paid Apple Developer Program.
+Stable macOS downloads are intentionally unsigned and are not notarized. The
+Tauri updater archive remains cryptographically signed with the dedicated
+GoodPhotos updater key.
 
 ## Per-release checklist
 
@@ -42,11 +41,19 @@
 
 4. Wait for the GitHub Actions `release` workflow to publish:
 
-   - workflow should pass `Validate macOS signing secrets`
+   - workflow first creates a draft and downloads its actual assets
+   - updater `.app.tar.gz` must pass Ed25519/Minisign verification against `src-tauri/updater.pubkey`
+   - `latest.json` version, tag, archive URL, and embedded signature must agree
+   - the archive bundle version must match the tag
+   - `hdiutil verify` must pass for the DMG
+   - the Release body must visibly disclose that the macOS build is unsigned and not notarized
    - `GoodPhotos_X.Y.Z_aarch64.dmg`
    - updater `.app.tar.gz`
    - updater `.sig`
    - `latest.json`
+
+   Only after these checks pass may the workflow publish the draft as a stable
+   release.
 
 5. Install the previous release on a macOS Apple Silicon machine, then verify:
 

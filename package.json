@@ -13,9 +13,11 @@
     "sync:shared-docs": "bash scripts/dual-repo/sync-shared-docs.sh",
     "test:providers": "node --import tsx tests/llmClient.providers.test.ts",
     "test:rate-limit": "node --import tsx tests/llmClient.rate-limit.test.ts",
+    "test:schema": "node --import tsx tests/llmClient.schema.test.ts",
     "test:updater": "node --import tsx tests/updater.test.ts",
     "test:gallery": "node --import tsx tests/galleryExporter.security.test.ts",
-    "test": "npm run test:providers && npm run test:rate-limit && npm run test:updater && npm run test:gallery"
+    "test:release-integrity": "node --import tsx tests/releaseIntegrity.test.ts",
+    "test": "npm run test:providers && npm run test:rate-limit && npm run test:schema && npm run test:updater && npm run test:gallery && npm run test:release-integrity"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
